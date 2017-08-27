@@ -25,11 +25,30 @@
 #include <gtk/gtk.h>
 #include <stdint.h>
 #include <sys/eventfd.h>
+#include <pthread.h>
+
+typedef struct {
+  int event_fd;
+  pthread_t bg_thread;
+} BackgroundThreadData;
+
+void* background_timer(void* user_data) {
+  BackgroundThreadData* bg_data = (BackgroundThreadData*)user_data;
+  uint64_t buffer = 1;
+  while(TRUE) {
+    //signal ui thread
+    write(bg_data->event_fd, &buffer, sizeof(buffer));
+    sleep(1);
+  }
+  return NULL;
+}
 
 typedef struct {
   GtkApplication* gtk_app;
   GtkWidget* countdown_label;
   uint64_t counter;
+  int event_fd;
+  BackgroundThreadData bg_data;
 } GtkTimerApp;
 
 typedef struct {
@@ -89,8 +108,8 @@ gboolean update_timer(gpointer user_data) {
   GtkTimerApp* timer_app = (GtkTimerApp*)user_data;
   timer_app->counter += 1;
   gchar text[20];
-  g_snprintf(&text, 20, "%li", timer_app->counter);
-  gtk_label_set_text(GTK_LABEL(timer_app->countdown_label), &text);
+  g_snprintf((gchar*)&text, 20, "%li", timer_app->counter);
+  gtk_label_set_text(GTK_LABEL(timer_app->countdown_label), (gchar*)&text);
   return G_SOURCE_CONTINUE;
 }
 
@@ -108,7 +127,8 @@ activate (GtkApplication *app,
   /* You can add GTK+ widgets to your window here.
    * See https://developer.gnome.org/ for help.
    */
-	GSource* s = bg_thread_signal_source_new(eventfd(0, EFD_NONBLOCK));
+  timer_app->event_fd = eventfd(0, EFD_NONBLOCK);
+	GSource* s = bg_thread_signal_source_new(timer_app->event_fd);
   g_source_attach(s, g_main_context_default());
   g_source_set_callback(s, update_timer, timer_app, NULL);
 
@@ -116,6 +136,9 @@ activate (GtkApplication *app,
   gtk_container_add(GTK_CONTAINER(window), timer_app->countdown_label);
 
   gtk_widget_show_all (window);
+
+  timer_app->bg_data.event_fd = timer_app->event_fd;
+  pthread_create(&timer_app->bg_data.bg_thread, NULL, background_timer, &timer_app->bg_data );
 }
 
 int main(int   argc,
@@ -131,6 +154,8 @@ int main(int   argc,
 
   g_signal_connect(gtk_app, "activate", G_CALLBACK (activate), (gpointer)&timer_app);
   int status = g_application_run (G_APPLICATION (gtk_app), argc, argv);
+
+  //pthread_join(&timer_app->bg_data.bg_thread);
 
   return status;
 }
