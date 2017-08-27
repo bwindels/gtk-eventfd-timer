@@ -155,6 +155,8 @@ int main(int   argc,
   g_signal_connect(gtk_app, "activate", G_CALLBACK (activate), (gpointer)&timer_app);
   int status = g_application_run (G_APPLICATION (gtk_app), argc, argv);
 
+  //if we had a way to signal the bg thread it needs to shutdown,
+  //we could wait for it to finish like so:
   //pthread_join(&timer_app->bg_data.bg_thread);
 
   return status;
